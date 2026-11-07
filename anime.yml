@@ -1,0 +1,43 @@
+name: Anime Automation Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: Direct link to the video file (.mp4, .mkv, ...)
+        required: true
+      title:
+        description: Video title on VK
+        required: true
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install feedparser requests
+
+      - name: Run Main Automation Script
+        env:
+          VK_ACCESS_TOKEN: ${{ secrets.VK_ACCESS_TOKEN }}
+          VK_GROUP_ID: ${{ secrets.VK_GROUP_ID }}
+          VIDEO_URL: ${{ inputs.video_url }}
+          VIDEO_TITLE: ${{ inputs.title }}
+        run: |
+          test -f main.py || { echo "::error::main.py not found in repo root"; ls -la; exit 1; }
+          test -n "$VK_ACCESS_TOKEN" || { echo "::error::VK_ACCESS_TOKEN secret is not set"; exit 1; }
+          test -n "$VK_GROUP_ID" || { echo "::error::VK_GROUP_ID secret is not set"; exit 1; }
+          python -u main.py
