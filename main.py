@@ -117,6 +117,10 @@ def upload_video_to_vk(video_path: Path, title: str) -> dict:
     group_id = os.getenv("VK_GROUP_ID")
     if not token or not group_id:
         raise RuntimeError("VK_ACCESS_TOKEN and VK_GROUP_ID must be configured")
+    try:
+        group_id = str(abs(int(group_id.strip())))
+    except ValueError as exc:
+        raise RuntimeError("VK_GROUP_ID must be a numeric VK community ID") from exc
     params = {"access_token": token, "v": VK_API_VERSION, "group_id": group_id,
               "name": title, "description": "Uploaded via Anime Automation Pipeline", "wallpost": 0}
     saved = requests.post("https://api.vk.com/method/video.save", params=params, timeout=REQUEST_TIMEOUT)
@@ -136,6 +140,34 @@ def upload_video_to_vk(video_path: Path, title: str) -> dict:
     return result
 
 
+def validate_vk_configuration() -> None:
+    """Validate the token and group before downloading a large release."""
+    token = os.getenv("VK_ACCESS_TOKEN")
+    raw_group_id = (os.getenv("VK_GROUP_ID") or "").strip()
+    if not token or not raw_group_id:
+        raise RuntimeError("VK_ACCESS_TOKEN and VK_GROUP_ID must be configured")
+    try:
+        group_id = str(abs(int(raw_group_id)))
+    except ValueError as exc:
+        raise RuntimeError("VK_GROUP_ID must be a numeric VK community ID") from exc
+    response = requests.get(
+        "https://api.vk.com/method/groups.getById",
+        params={"access_token": token, "v": VK_API_VERSION, "group_id": group_id},
+        timeout=REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if "error" in payload:
+        error = payload["error"]
+        raise RuntimeError(
+            f"VK preflight failed (code {error.get('error_code')}): {error.get('error_msg')}"
+        )
+    groups = payload.get("response", {}).get("groups", [])
+    if not groups:
+        raise RuntimeError("VK preflight found no accessible group for VK_GROUP_ID")
+    print(f"VK preflight passed for group {groups[0].get('id')} ({groups[0].get('name', 'unnamed')})")
+
+
 def commit_assets() -> None:
     subprocess.run(["git", "config", "user.name", "github-actions[bot]"], cwd=ROOT, check=True)
     subprocess.run(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], cwd=ROOT, check=True)
@@ -150,6 +182,7 @@ def commit_assets() -> None:
 
 
 def main() -> int:
+    validate_vk_configuration()
     release = latest_release()
     slug = slugify(release["title"])
     os.environ["ANIME_SLUG"] = slug
